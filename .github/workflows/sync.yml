@@ -1,0 +1,77 @@
+# The scheduled job. Fetches balances, then publishes an encrypted page.
+# Nothing readable is stored here: the keys live in this repository's secret store.
+name: sync
+
+on:
+  schedule:
+    - cron: "*/15 * * * *"   # every 15 minutes (GitHub sometimes runs it late)
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pages: write
+  id-token: write
+  actions: write
+
+concurrency:
+  group: sync
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Fetch saved data
+        run: |
+          mkdir -p work
+          git fetch -q --depth=1 origin mac-state && git show FETCH_HEAD:mac.enc > work/mac.enc || rm -f work/mac.enc
+          git fetch -q --depth=1 origin cloud-state && git show FETCH_HEAD:cloud.enc > work/cloud.enc || rm -f work/cloud.enc
+
+      - name: Sync
+        env:
+          JM_SECRETS: ${{ secrets.JM_SECRETS }}
+        run: python3 cloud.py run work
+
+      - name: Save data
+        run: |
+          cd work/state
+          git init -q
+          git checkout -q -b cloud-state
+          git add cloud.enc
+          git -c user.name="sync" -c user.email="sync@users.noreply.github.com" commit -q -m "state"
+          git push -q -f "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" cloud-state
+
+      - name: Publish for the phone
+        run: |
+          cd work/live
+          git init -q
+          git checkout -q -b live
+          git add data.enc
+          git -c user.name="sync" -c user.email="sync@users.noreply.github.com" commit -q -m "live"
+          git push -q -f "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" live
+
+      # The page itself only needs refreshing now and then: the phone reads the numbers from the step above.
+      - id: when
+        run: |
+          if [ "${{ github.event_name }}" != "schedule" ] || [ "$(date -u +%M)" -lt 15 ]; then echo "pages=yes" >> "$GITHUB_OUTPUT"; else echo "pages=no" >> "$GITHUB_OUTPUT"; fi
+
+      - uses: actions/upload-pages-artifact@v4
+        if: steps.when.outputs.pages == 'yes'
+        with:
+          path: work/site
+
+      - id: deploy
+        if: steps.when.outputs.pages == 'yes'
+        uses: actions/deploy-pages@v4
+
+      - name: Keep the schedule switched on
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh api -X PUT "repos/${{ github.repository }}/actions/workflows/sync.yml/enable"

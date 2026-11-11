@@ -1,0 +1,791 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="jm-mode" content="local">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Money">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="theme-color" content="#ffffff">
+<link rel="apple-touch-icon" href="/icon.png">
+<title>__APP_NAME__</title>
+<link rel="icon" href="/icon.png">
+<style>
+/* ------------------------------------------------------------------
+   One number on a white page. Two colours, one typeface, one text size
+   (plus the number itself). Nothing else is shown until you ask.
+
+   The rules of the interface:
+     - anything that turns black under the pointer can be clicked
+     - every number opens into the numbers it's made of
+     - every date takes the whole page to that day
+------------------------------------------------------------------- */
+:root { --bg: #fff; --fg: #000; }
+html.inv { --bg: #000; --fg: #fff; }
+* { box-sizing: border-box; }
+html, body { margin: 0; background: var(--bg); color: var(--fg); }
+body { font: 13px/1.5 "Helvetica Neue", Helvetica, Arial, sans-serif; font-variant-numeric: tabular-nums; -webkit-font-smoothing: antialiased; min-height: 100vh; }
+button, input, select { font: inherit; color: inherit; background: none; border: 0; padding: 0; margin: 0; border-radius: 0; }
+button { cursor: pointer; }
+
+#stage { width: min(680px, calc(100% - 48px)); margin: 0 auto; padding: 38vh 0 150px; transition: padding-top .45s cubic-bezier(.2, .7, .2, 1); }
+#stage.opened { padding-top: 92px; }
+
+/* rows */
+.row { display: flex; align-items: baseline; gap: 14px; padding: 5px 8px 5px calc(8px + var(--d) * 22px); margin: 0 -8px; cursor: pointer; outline: 0; user-select: none; -webkit-user-select: none; }
+.row:focus-visible { background: var(--fg); color: var(--bg); }
+@media (hover: hover) { .row:hover { background: var(--fg); color: var(--bg); } .row:hover .sp { opacity: 1; } .row.root:hover { background: none; color: inherit; }
+  .w:hover, #sugg div.c:hover { background: var(--fg); color: var(--bg); } }
+.name { text-transform: lowercase; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.fill { flex: 1; }
+.sp { flex: none; align-self: center; padding: 4px 6px; margin: -4px -6px; opacity: 0; line-height: 0; }
+.sp svg { width: 72px; height: 14px; display: block; overflow: visible; }
+.row:focus-visible .sp { opacity: 1; }
+.val { white-space: nowrap; }
+.val s { text-decoration-thickness: 1px; }
+
+/* the number */
+.row.root { font-size: clamp(56px, 11vw, 148px); line-height: 1; letter-spacing: -.045em; padding: 0; margin: 0 0 22px; align-items: flex-start; gap: 0; }
+.row.root:focus-visible { background: none; color: inherit; }
+.row.root:focus-visible .val { text-decoration: underline; text-decoration-thickness: 2px; text-underline-offset: .09em; }
+.row.root .val s { font-size: 13px; line-height: 1.5; letter-spacing: 0; vertical-align: top; margin: .5em 0 0 12px; display: inline-block; }
+.row.root .unit { font-size: 13px; line-height: 1.5; letter-spacing: 0; margin: .5em 6px 0 -4px; }
+.row.root .sp { align-self: flex-end; margin: 0 0 .12em 18px; padding: 6px; }
+.row.root .sp svg { width: 120px; height: 36px; }
+
+/* words you can click */
+.w { padding: 1px 4px; margin: 0 -4px; outline: 0; white-space: nowrap; }
+.w:focus-visible, .w:active { background: var(--fg); color: var(--bg); }
+.w.on, .w.d { text-decoration: underline; text-underline-offset: 3px; }
+.words { display: flex; flex-wrap: wrap; gap: 4px 20px; margin: 10px 0; }
+
+/* what opens under a row */
+.kids.in, .story.in, .form.in { animation: in .24s ease-out; }
+@keyframes in { from { opacity: 0; transform: translateY(-6px); } }
+.story { padding: 12px 0 20px calc(var(--d) * 22px); }
+.chart { position: relative; }
+.chart svg { display: block; width: 100%; height: 120px; overflow: visible; cursor: crosshair; }
+.chart text { font: 13px "Helvetica Neue", Helvetica, Arial, sans-serif; fill: var(--fg); }
+.facts { margin: 12px 0; max-width: 62ch; }
+
+/* forms: lines to write on */
+.form { padding: 14px 0 6px; }
+.form .line { display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: baseline; margin-bottom: 8px; }
+.form input, .form select { border-bottom: 1px solid var(--fg); padding: 3px 0; min-width: 0; outline: 0; flex: 1 1 120px; -webkit-appearance: none; appearance: none; }
+.form input[type=file] { border: 0; flex: 2 1 220px; }
+.form input::placeholder, #q::placeholder { color: var(--fg); opacity: 1; }
+.form input:focus::placeholder { opacity: 0; }
+.form input:focus-visible, .form select:focus-visible { border-bottom-width: 2px; padding-bottom: 2px; }
+.form select option { color: #000; background: #fff; }
+
+/* fixed furniture: status (only when there's something to say), the prompt, and the line of time */
+#status { position: fixed; top: 18px; left: 24px; right: 24px; pointer-events: none; z-index: 3; }
+#status > div { pointer-events: auto; display: inline-block; background: var(--bg); padding-right: 6px; }
+#status .l { display: block; }
+#cmd { position: fixed; left: 24px; bottom: 36px; width: min(560px, calc(100% - 48px)); z-index: 4; }
+#q { width: 3ch; outline: 0; caret-color: var(--fg); background: var(--bg); cursor: pointer; }
+#cmd.open #q { width: 100%; cursor: text; }
+#sugg { padding: 10px 0 14px; max-height: calc(100vh - 110px); overflow: auto; display: none; }
+#cmd.open::before { content: ""; position: fixed; inset: 0; background: var(--bg); z-index: -1; }   /* the prompt gets the whole page while it's open */
+#cmd.open #sugg { display: block; }
+#sugg div { display: flex; gap: 20px; padding: 2px 6px; margin: 0 -6px; }
+#sugg div span:first-child { flex: 0 0 26ch; }
+#sugg div.c { cursor: pointer; }
+#sugg div.c span:first-child { flex: 1; }
+#sugg div.sel, #sugg div.c:active { background: var(--fg); color: var(--bg); }
+#sugg div.gap { height: 10px; }
+#time { position: fixed; left: 0; right: 0; bottom: 0; height: 26px; cursor: ew-resize; z-index: 2; touch-action: none; }
+#time::after { content: ""; position: absolute; left: 0; right: 0; bottom: 0; border-top: 1px solid var(--fg); }
+#tick { position: absolute; bottom: 0; width: 1px; height: 12px; background: var(--fg); }
+#tdate { position: absolute; bottom: 14px; white-space: nowrap; background: var(--bg); padding: 0 4px; display: none; }
+
+#qx { display: none; }
+.qr { display: block; width: 196px; height: 196px; margin: 0 0 18px -16px; }
+html.inv .qr { margin-left: 0; }
+.sel-ok { user-select: text; -webkit-user-select: text; word-break: break-all; }
+
+/* ------------------------------------------------------------------
+   Phone. Same rules, rebuilt for a thumb. One number fills the width.
+   Tapping a row makes it the number; the rows above it lead back out.
+------------------------------------------------------------------- */
+html.m body { font-size: 16px; -webkit-text-size-adjust: 100%; -webkit-tap-highlight-color: transparent; overscroll-behavior-y: none; }
+html.m #status { position: sticky; top: 0; left: auto; right: auto; padding: calc(env(safe-area-inset-top) + 10px) 20px 0; background: var(--bg); pointer-events: auto; }
+html.m #status > div { display: block; padding: 0 0 8px; }
+html.m #status .l { padding: 3px 0; }
+html.m #stage { width: auto; margin: 0 20px; padding: 30vh 0 190px; padding-top: 30dvh; }
+html.m #stage.opened { padding-top: 4px; }
+html.m .screen.in { animation: in .22s ease-out; }
+html.m .row { min-height: 50px; align-items: center; padding: 0 20px; margin: 0 -20px; gap: 12px; touch-action: pan-y; -webkit-touch-callout: none; }
+html.m .row:active { background: var(--fg); color: var(--bg); }
+html.m .head { display: flex; align-items: center; min-height: 50px; text-transform: lowercase; }
+html.m .spb { padding: 15px 0 15px 24px; line-height: 0; }
+html.m .spb svg { width: 96px; height: 20px; display: block; overflow: visible; }
+html.m .row.root { padding: 0; margin: 0 0 18px; min-height: 0; align-items: flex-start; letter-spacing: -.045em; line-height: 1; }
+html.m .row.root:active { background: none; color: inherit; }
+html.m .row.root .unit { font-size: 16px; margin: 0 2px 0 -8px; padding: 6px 8px 14px; }
+html.m .row.root .val { white-space: normal; }
+html.m .row.root .val s { display: block; font-size: 16px; margin: 10px 0 0; }
+html.m .story { padding: 4px 0 22px; }
+html.m .chart svg { height: 150px; touch-action: pan-y; }
+html.m .chart text { font-size: 16px; }
+html.m .w { padding: 11px 6px; margin: -11px -6px; }
+html.m .words { gap: 22px 28px; margin: 22px 0; }
+html.m .facts div { padding: 4px 0; }
+html.m .form .line { flex-direction: column; align-items: stretch; gap: 16px; margin-bottom: 16px; }
+html.m .form input, html.m .form select { flex: none; min-height: 44px; font-size: 16px; }
+html.m #cmd { left: 12px; right: 12px; width: auto; bottom: calc(env(safe-area-inset-bottom) + 50px); }
+html.m #q { width: 44px; height: 44px; padding: 0 8px; font-size: 16px; }
+html.m #cmd.open { inset: 0; padding: calc(env(safe-area-inset-top) + 8px) 0 0; display: flex; flex-direction: column; overflow: hidden; }
+html.m #cmd.open #q { order: 0; flex: none; width: calc(100% - 110px); margin: 0 20px; padding: 0; border-bottom: 1px solid var(--fg); }
+html.m #cmd.open #sugg { order: 1; flex: 1; min-width: 0; max-height: none; padding: 18px 0 55vh; overflow-x: hidden; overflow-y: auto; overscroll-behavior: contain; touch-action: pan-y; }   /* up and down only */
+html.m #cmd.open #qx { display: block; position: absolute; right: 20px; top: calc(env(safe-area-inset-top) + 8px); height: 44px; }
+html.m #sugg div { display: block; padding: 0 20px; margin: 0 0 14px; overflow-wrap: anywhere; }
+html.m #sugg div span { display: block; flex: none; }
+html.m, html.m body { overflow-x: hidden; overflow-x: clip; overscroll-behavior-x: none; }
+html.m #sugg div.c { display: flex; align-items: center; min-height: 48px; margin-bottom: 0; }
+html.m #sugg div.gap { height: 6px; }
+html.m #time { height: 44px; bottom: env(safe-area-inset-bottom); }
+html.m body::after { content: ""; position: fixed; left: 0; right: 0; bottom: 0; height: calc(env(safe-area-inset-bottom) + 100px); background: var(--bg); z-index: 1; }
+html.m .w:focus-visible { background: none; color: inherit; }
+html.m .w:active { background: var(--fg); color: var(--bg); }
+html.m .head, html.m .facts { -webkit-user-select: none; user-select: none; }
+html.m #tdate { bottom: 18px; }
+@media (max-width: 560px) { #stage { width: calc(100% - 32px); } .row { padding-left: calc(8px + var(--d) * 14px); } .story { padding-left: calc(var(--d) * 14px); } #sugg div span:first-child { flex-basis: 18ch; } }
+@media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation: none !important; transition: none !important; } }
+</style>
+</head>
+<body ontouchstart="">
+<div id="status" aria-live="polite"></div>
+<main id="stage"></main>
+<div id="cmd"><div id="sugg"></div><button id="qx" class="w d" type="button">close</button><input id="q" placeholder="_" enterkeyhint="go" autocomplete="off" autocapitalize="off" spellcheck="false" aria-label="Type to find anything or run a command"></div>
+<div id="time" title=""><i id="tick"></i><span id="tdate"></span></div>
+
+<script>
+const UI_VERSION = "16";
+const $ = (s, el = document) => el.querySelector(s);
+const $$ = (s, el = document) => [...el.querySelectorAll(s)];
+const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+const PARAMS = new URLSearchParams(location.search);
+const MOBILE = PARAMS.has("m") ? PARAMS.get("m") === "1" : matchMedia("(hover: none) and (pointer: coarse)").matches;
+document.documentElement.classList.toggle("m", MOBILE);
+// Away from home this same page is published on its own, with the numbers beside it as a locked file.
+// The key that opens it is the part of your link after #k=. Browsers never send that part anywhere.
+const CLOUD = (document.querySelector('meta[name="jm-mode"]') || {}).content === "cloud";
+let bundle = null, shownBuilt = null;
+function cloudKey() { const m = /[#&]k=([\w-]+)/.exec(location.hash); try { if (m) localStorage.setItem("jm-k", m[1]); return m ? m[1] : localStorage.getItem("jm-k"); } catch (e) { return m ? m[1] : null; } }
+async function unlock(buf, key) {
+  const b = new Uint8Array(buf), sub = crypto.subtle, te = new TextEncoder(), H = { name: "HMAC", hash: "SHA-256" };
+  if (b.length < 52 || b[0] !== 74 || b[1] !== 77 || (b[2] !== 49 && b[2] !== 50)) throw new Error("data");
+  const k = Uint8Array.from(atob(key.replace(/-/g, "+").replace(/_/g, "/")), c => c.charCodeAt(0));
+  const root = await sub.importKey("raw", k, H, false, ["sign"]);
+  const ek = await sub.sign("HMAC", root, te.encode("enc")), mk = await sub.sign("HMAC", root, te.encode("mac"));
+  const body = b.subarray(0, b.length - 32), tag = b.subarray(b.length - 32);
+  if (!(await sub.verify("HMAC", await sub.importKey("raw", mk, H, false, ["verify"]), tag, body))) throw new Error("key");
+  const alg = b[2] === 50 ? { name: "AES-CTR", counter: body.subarray(4, 20), length: 32 } : { name: "AES-CBC", iv: body.subarray(4, 20) };
+  const plain = await sub.decrypt(alg, await sub.importKey("raw", ek, alg.name, false, ["decrypt"]), body.subarray(20));
+  if (body[3] !== 1) return JSON.parse(new TextDecoder().decode(plain));
+  const out = new Blob([plain]).stream().pipeThrough(new DecompressionStream("deflate"));
+  return JSON.parse(await new Response(out).text());
+}
+// Two places to read from. "live" is updated by your computer the moment it syncs, and by GitHub every 15 minutes
+// when the computer's off. The copy beside this page is the fallback. Whichever is newest wins.
+const REPO = ((document.querySelector('meta[name="jm-repo"]') || {}).content || "") || (location.hostname.endsWith(".github.io") ? location.hostname.split(".")[0] + "/" + location.pathname.split("/")[1] : "");
+async function grab(url, opts, key) { try { const r = await fetch(url, opts); if (!r.ok) return { miss: true }; return { b: await unlock(await r.arrayBuffer(), key) }; } catch (e) { return { bad: e && e.message === "key", miss: true }; } }
+async function cloudApi(p, body) {
+  if (body !== undefined) return { ok: false, error: "this copy is for looking. change things on your computer" };
+  if (p === "/api/state" || !bundle) {
+    const key = cloudKey(); if (!key) throw new Error("nokey");
+    const live = REPO && typeof DecompressionStream === "function"
+      ? grab(`https://api.github.com/repos/${REPO}/contents/data.enc?ref=live`, { cache: "no-cache", headers: { Accept: "application/vnd.github.raw" } }, key) : Promise.resolve({ miss: true });
+    const here = !bundle || !bundle.live ? grab("data.enc?" + Date.now(), { cache: "no-store" }, key) : Promise.resolve({ miss: true });
+    const [a, b] = await Promise.all([live, here]);
+    const got = [a.b, b.b].filter(Boolean).sort((x, y) => (y.built || "").localeCompare(x.built || ""))[0];
+    if (got) { if (a.b === got) got.live = true; if (!bundle || (got.built || "") >= (bundle.built || "")) bundle = got; }
+    else if (!bundle) throw new Error(a.bad || b.bad ? "key" : "offline");
+  }
+  return bundle[p.split("?")[0]];
+}
+const api = CLOUD ? cloudApi : async (p, body) => (await fetch(p, body === undefined ? {} : { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) })).json();
+const ago = iso => { const m = (Date.now() - new Date(iso).getTime()) / 6e4; return m < 1 ? "just now" : m < 1.5 ? "a minute ago" : m < 90 ? Math.round(m) + " minutes ago" : m < 2880 ? Math.round(m / 60) + " hours ago" : Math.round(m / 1440) + " days ago"; };
+const fmt = (n, d = 0) => { const r = Math.abs(n) < (d ? .005 : .5) ? 0 : n; return (r < 0 ? "−" : "") + Math.abs(r).toLocaleString("en-NZ", { minimumFractionDigits: d, maximumFractionDigits: d }); };
+const signed = (n, d = 0) => (Math.abs(n) < .5 ? "" : n > 0 ? "+" : "") + fmt(n, d);
+const dayOf = iso => new Date(iso.slice(0, 10) + "T00:00:00");
+const shortDate = iso => dayOf(iso).toLocaleDateString("en-NZ", { day: "numeric", month: "short", year: "numeric" });
+const monthYear = iso => dayOf(iso).toLocaleDateString("en-NZ", { month: "short", year: "numeric" });
+const per = { weekly: "week", fortnightly: "fortnight", monthly: "month" };
+const store = { get: k => { try { return localStorage.getItem(k); } catch (e) { return null; } }, set: (k, v) => { try { localStorage.setItem(k, v); } catch (e) {} } };
+const parseNum = s => parseFloat(String(s).replace(/,/g, "").replace(/−/g, "-").replace(/\$/g, ""));
+
+// ---------------------------------------------------------------- state
+let S = null, X = null, T = [], N = {};
+let open = new Set(), story = new Set(), just = null;
+let asOf = null, peek = null;            // pinned day, and the day under the pointer
+let lens = 0;                            // 0 dollars, 1 share, 2 change in 30 days, 3 change in a year, 4 gain or loss from prices
+let range = 365;                         // how much history the lines show (0 = all)
+let F = {};                              // what-if multipliers by account or holding
+let showEmpty = false, adding = false, importing = false, editing = null, picking = null, deleting = null;
+let note = "", busy = "", charts = [], tHover = false;
+let focus = "nw";                        // phone: the number you're looking at
+let phonePanel = false, P = null;        // Mac: the "see this on your phone" panel
+const LENS = [["$", "dollars"], ["%", "share of what you own"], ["30d", "change in 30 days"], ["1y", "change in a year"], ["±%", "gain or loss from prices"]];
+
+function setInv(on) {
+  document.documentElement.classList.toggle("inv", on); store.set("inv", on ? "1" : "");
+  const tc = document.querySelector('meta[name="theme-color"]'); if (tc) tc.content = on ? "#000000" : "#ffffff";
+  try { window.webkit.messageHandlers.jm.postMessage({ invert: on }); } catch (e) {}
+}
+setInv(store.get("inv") === "1");
+
+// ---------------------------------------------------------------- the tree
+function build() {
+  const cname = Object.fromEntries(X.classes.map(c => [c.key, c.name]));
+  const live = l => showEmpty || Math.abs(l.value) >= .005 || l.series.some(v => Math.abs(v) >= .005);
+  const mk = (id, name, kind, extra) => Object.assign({ id, name, kind, kids: [] }, extra);
+  const leafNode = l => { const n = mk(l.key, l.name, "leaf", { leaf: l }); n.kids = l.holdings.filter(h => h.value > .5).map(h => mk(l.key + "/" + h.code, h.name || h.code, "holding", { h })); return n; };
+  const big = (a, b) => Math.abs(b.leaf.value) - Math.abs(a.leaf.value);
+  const root = mk("nw", "net worth", "root"), own = mk("own", "own", "side"), owe = mk("owe", "owe", "side");
+  X.classes.filter(c => c.key !== "debt").forEach(c => {
+    const ls = X.leaves.filter(l => l.cls === c.key && live(l));
+    if (ls.length) own.kids.push(mk("c:" + c.key, cname[c.key], "cls", { cls: c.key, kids: ls.map(leafNode).sort(big) }));
+  });
+  owe.kids = X.leaves.filter(l => l.cls === "debt" && live(l)).map(leafNode).sort(big);
+  root.kids = owe.kids.length ? [own, owe] : [own];
+  N = {};
+  (function walk(n, parent, depth, sign) { n.parent = parent; n.depth = depth; n.sign = sign; N[n.id] = n; n.kids.forEach(k => walk(k, n, depth + 1, k.id === "owe" ? -1 : sign)); })(root, null, 0, 1);
+}
+const last = () => X.dates.length - 1;
+const cur = () => peek ?? asOf ?? last();
+
+function leafVal(l, i, wi) {
+  const base = l.series[i]; if (!wi) return base;
+  const f = F[l.key] ?? 1, hs = l.holdings;
+  if (!hs.length || !l.value) return base * f;
+  let sum = 0, sumF = 0; hs.forEach(h => { sum += h.value; sumF += h.value * (F[l.key + "/" + h.code] ?? 1); });
+  return f * (base / l.value) * (l.value - sum + sumF);
+}
+function raw(n, i, wi) {
+  if (n.kind === "leaf") return leafVal(n.leaf, i, wi);
+  if (n.kind === "holding") { const l = n.parent.leaf; return l.value ? n.h.value * (l.series[i] / l.value) * (wi ? (F[l.key] ?? 1) * (F[n.id] ?? 1) : 1) : 0; }
+  let s = 0; for (const k of n.kids) s += raw(k, i, wi); return s;
+}
+const val = (n, i, wi) => raw(n, i, wi) * n.sign;
+function isEst(n, i) {
+  if (n.kind === "leaf") return !!n.leaf.est[i];
+  if (n.kind === "holding") return i !== last();
+  return n.kids.some(k => isEst(k, i));
+}
+function back(i, days) {
+  const target = T[i] - days * 864e5; let j = null;
+  for (let k = 0; k <= i; k++) { if (T[k] <= target) j = k; else break; }
+  if (j === null && T[0] <= target + 14 * 864e5 && i > 0) j = 0;
+  return j;
+}
+function keysUnder(n) { if (n.kind === "leaf" || n.kind === "holding") return [n.id]; return n.kids.flatMap(keysUnder); }
+const under = (n, id) => { for (let p = n; p; p = p.parent) if (p.id === id) return true; return false; };
+
+// What prices did, apart from money going in or out. Each holding has a price and a number of units for every day
+// since it was first recorded. A day's gain is yesterday's units times the change in price, so buying more never counts
+// as a gain. Percentages are chained day by day, which keeps a top-up from watering them down.
+function priced(n, out = []) { if (n.kind === "holding") { if (n.h.p) out.push(n.h); } else if (n.kind === "leaf") n.leaf.holdings.forEach(h => { if (h.p) out.push(h); }); else n.kids.forEach(k => priced(k, out)); return out; }
+function gain(n, a, b) {
+  const hs = priced(n).filter(h => h.code !== "NZD"); let d = 0, r = 1, from = null;
+  for (let t = Math.max(1, a + 1); t <= b; t++) {
+    let num = 0, den = 0;
+    for (const h of hs) { const p0 = h.p[t - 1], p1 = h.p[t], q = h.q[t - 1]; if (p0 === null || p1 === null || !q) continue; num += q * (p1 - p0); den += q * p0; }
+    if (den > 0) { if (from === null) from = t - 1; d += num; r *= 1 + num / den; }
+  }
+  return from === null ? null : { d: d * (n.sign < 0 ? -1 : 1), r: r - 1, from };
+}
+const gainFrom = i => range ? (back(i, range) ?? 0) : 0;      // follows the 3 months / 1 year / all choice
+const pctText = r => (Math.abs(r) < .0005 ? "" : r > 0 ? "+" : "−") + Math.abs(r * 100).toFixed(1) + "%";
+function lensText(n, i, wi, big) {
+  if (lens === 4) { const g = gain(n, gainFrom(i), i); return g ? pctText(g.r) : "—"; }
+  const v = val(n, i, wi);
+  if (lens === 0) return fmt(v, big && n.kind === "root" ? 2 : 0);
+  if (lens === 1) { const o = val(N.own, i, wi); return o ? (v / o * 100).toFixed(1) + "%" : "—"; }
+  const j = back(i, lens === 2 ? 30 : 365);
+  return j === null ? "—" : (signed(v - val(n, j, wi)) || "0");
+}
+function valHTML(n, big) {
+  const i = cur(), changed = Math.abs(val(n, i, true) - val(n, i, false)) > .5;
+  const now = (lens !== 4 && isEst(n, i) ? "~" : "") + lensText(n, i, true, big), was = changed ? `<s>${lensText(n, i, false, big)}</s>` : "";
+  return big ? `<span class="num">${now}</span>${was}` : (was ? was + " " : "") + now;   // the big number keeps its place; the real figure sits beside it, small
+}
+
+// ---------------------------------------------------------------- drawing
+function rangeIdx() { const L = last(); if (!range) return X.dates.map((_, i) => i); const from = T[L] - range * 864e5; const out = []; for (let i = 0; i <= L; i++) if (T[i] >= from) out.push(i); return out; }
+function thin(idx, max) { if (idx.length <= max) return idx; const k = Math.ceil(idx.length / max), out = idx.filter((_, j) => j % k === 0); if (out[out.length - 1] !== idx[idx.length - 1]) out.push(idx[idx.length - 1]); return out; }
+function spark(n, w, h) {
+  const idx = thin(rangeIdx(), 48); if (idx.length < 2) return "";
+  const vs = idx.map(i => val(n, i, false)), lo = Math.min(...vs), hi = Math.max(...vs), t0 = T[idx[0]], t1 = T[idx[idx.length - 1]];
+  const p = idx.map((i, k) => ((T[i] - t0) / (t1 - t0 || 1) * w).toFixed(1) + "," + (hi - lo < .5 ? h / 2 : 1 + (hi - vs[k]) / (hi - lo) * (h - 2)).toFixed(1)).join(" ");
+  return `<span class="sp" title="History and facts"><svg viewBox="0 0 ${w} ${h}" aria-hidden="true"><polyline points="${p}" fill="none" stroke="currentColor" stroke-width="1" vector-effect="non-scaling-stroke"/></svg></span>`;
+}
+function rowHTML(n) {
+  const root = n.kind === "root";
+  let h = `<div class="row${root ? " root" : ""}" data-id="${esc(n.id)}" tabindex="0" role="button" aria-expanded="${open.has(n.id) || story.has(n.id)}" aria-label="${esc(n.name)}" style="--d:${Math.max(0, n.depth - 1)}">` +
+    (root ? `<button class="unit w" data-act="lens" title="Change what the numbers show"></button><span class="val"></span>${spark(n, 120, 36)}`
+          : `<span class="name">${esc(n.name)}</span><span class="fill"></span>${spark(n, 72, 14)}<span class="val"></span>`) + `</div>`;
+  if (story.has(n.id)) h += storyHTML(n);
+  if (open.has(n.id) && n.kids.length) h += `<div class="kids${just === n.id ? " in" : ""}">` + n.kids.map(rowHTML).join("") + `</div>`;
+  return h;
+}
+function storyHTML(n) {
+  const d = MOBILE ? 0 : Math.max(0, n.depth), W = (act, label, extra = "", cls = "") => `<button class="w ${cls}" data-act="${act}" ${extra}>${label}</button>`;
+  const ranges = [[90, "3 months"], [365, "1 year"], [0, "all"]].map(([v, l]) => W("range", l, `data-v="${v}"`, range === v ? "on" : "")).join("");
+  let acts = [];
+  if (n.kind === "root") {
+    if (!CLOUD) acts.push(W("sync", "sync now"), W("add", "add something"), W("import", "import student loan"), W("rebuild", "rebuild past year"));
+    if (S.local && !MOBILE) acts.push(W("phone", "see this on your phone"));
+    if (X.leaves.some(l => Math.abs(l.value) < .005 && !l.series.some(v => Math.abs(v) >= .005))) acts.push(W("empty", showEmpty ? "hide empty accounts" : "show empty accounts"));
+    if (!CLOUD) X.hidden.forEach(hd => acts.push(W("unhide", `show ${esc(hd.name.toLowerCase())} again`, `data-key="${esc(hd.key)}"`)));
+  }
+  if (!CLOUD && n.kind === "leaf" && n.leaf.source === "sync") {
+    if (picking === n.id) X.classes.forEach(c => acts.push(W("setcls", esc(c.name.toLowerCase()), `data-id="${esc(n.id)}" data-cls="${c.key}"`, c.key === n.leaf.cls ? "on" : "")));
+    else acts.push(W("pick", "counts as " + esc(X.classes.find(c => c.key === n.leaf.cls).name.toLowerCase()), `data-id="${esc(n.id)}"`), W("hide", "leave out of net worth", `data-id="${esc(n.id)}"`));
+  }
+  if (!CLOUD && n.kind === "leaf" && n.leaf.source === "manual") acts.push(W("edit", "edit", `data-mid="${n.leaf.id}"`), deleting === n.leaf.id ? W("really", "really delete", `data-mid="${n.leaf.id}"`) : W("del", "delete", `data-mid="${n.leaf.id}"`));
+  if (affected(n)) acts.push(W("undo", "undo what if", `data-id="${esc(n.id)}"`));
+  return `<div class="story${just === n.id ? " in" : ""}" style="--d:${d}">
+    <div class="chart" data-chart="${esc(n.id)}"></div>
+    <div class="words">${ranges}</div>
+    <div class="facts">${facts(n).map(l => `<div>${l}</div>`).join("")}</div>
+    ${acts.length ? `<div class="words">${acts.join("")}</div>` : ""}
+    ${n.kind === "leaf" && n.leaf.source === "manual" && editing === n.leaf.id ? itemForm(n.leaf) : ""}
+  </div>`;
+}
+
+function itemForm(l) {
+  const sel = (id, opts, cur, label) => `<select id="${id}" aria-label="${label}">${opts.map(([v, t]) => `<option value="${v}"${v === cur ? " selected" : ""}>${t}</option>`).join("")}</select>`;
+  return `<div class="form${just === "form" ? " in" : ""}">
+    <div class="line"><input id="mName" placeholder="name" aria-label="Name" value="${esc(l ? l.name : "")}">
+      ${sel("mCls", X.classes.map(c => [c.key, c.key === "debt" ? "a debt (you owe it)" : c.name.toLowerCase()]), l ? l.cls : "cash", "What it counts as")}
+      <input id="mVal" placeholder="amount" inputmode="decimal" aria-label="Amount" value="${l ? l.amount : ""}">
+      <input id="mNote" placeholder="where from, e.g. IRD" aria-label="Where from" value="${esc(l ? l.institution : "")}"></div>
+    <div class="line"><span>changes on its own</span>
+      ${sel("mEvery", [["", "never"], ["weekly", "every week"], ["fortnightly", "every fortnight"], ["monthly", "every month"]], l && l.sched ? l.sched.every : "", "How often it changes")}
+      <input id="mStep" placeholder="by, e.g. −257.76" inputmode="decimal" aria-label="Change each time" value="${l && l.sched ? l.sched.amount : ""}">
+      <input id="mNext" type="date" aria-label="Next change" value="${l && l.sched && l.sched.next ? l.sched.next : ""}"></div>
+    <div class="words">${l ? "" : [["student loan", "debt", "IRD"], ["tax to pay", "debt", "IRD"], ["tax refund due", "cash", "IRD"], ["kiwisaver", "kiwisaver", ""], ["car", "property", ""]].map(p => `<button class="w" data-act="preset" data-p='${JSON.stringify(p)}'>${p[0]}</button>`).join("")}
+      <button class="w on" data-act="save">save</button><button class="w" data-act="cancel">cancel</button></div>
+  </div>`;
+}
+function forms() {
+  let h = "";
+  if (adding) h += itemForm(null);
+  if (importing) h += `<div class="form${just === "form" ? " in" : ""}">
+    <div class="facts">in myIR, open student loan, then transactions, and download the .xlsx. the file has no balance in it, so type today's balance from myIR too. your past balance is rebuilt exactly and the loan then goes down by your usual repayment every fortnight.</div>
+    <div class="line"><input id="impFile" type="file" accept=".xlsx" aria-label="myIR file"><input id="impBal" placeholder="balance today" inputmode="decimal" aria-label="Balance today"></div>
+    <div class="words"><button class="w on" data-act="importgo">import</button><button class="w" data-act="cancel">cancel</button></div></div>`;
+  if (phonePanel && P) h += `<div class="form${just === "form" ? " in" : ""}">` + (P.away
+    ? `${qrSVG(P.away.qr)}<div class="facts"><div>point your phone's camera at the square.</div><div>keep it to yourself: anyone with the link can see your numbers.</div>
+        ${P.away.error ? `<div>the latest changes couldn't be sent: ${esc(P.away.error)}</div>` : ""}</div>
+       <div class="words"><button class="w on" data-act="awaycopy">copy link</button><button class="w" data-act="cancel">close</button></div>`
+    : `<div class="facts"><div>in the app's folder, double-click cloud-setup.command (Mac) or Phone setup.bat (Windows), then come back here.</div></div>
+       <div class="words"><button class="w" data-act="cancel">close</button></div>`) + `</div>`;
+  return h;
+}
+
+function qrSVG(rows) {   // always black on white, with a quiet margin, so a camera can read it in either theme
+  if (!rows) return ""; const n = rows.length, q = 4; let d = "";
+  rows.forEach((r, y) => { for (let x = 0; x < n; x++) if (r[x] === "1") { let w = 1; while (r[x + w] === "1") w++; d += `M${x + q},${y + q}h${w}v1h-${w}z`; x += w - 1; } });
+  return `<svg class="qr" viewBox="0 0 ${n + 2 * q} ${n + 2 * q}" shape-rendering="crispEdges" role="img" aria-label="Code to open this on your phone"><rect width="100%" height="100%" fill="#fff"/><path d="${d}" fill="#000"/></svg>`;
+}
+
+// ---- phone: the screen is one number, the rows that lead to it, and the rows inside it
+function drawMobile() {
+  if (!N[focus]) focus = "nw";
+  const n = N[focus], st = $("#stage"), isRoot = n.kind === "root";
+  const base = isRoot && !open.has("nw") && !story.has("nw") && !adding && !importing;
+  st.classList.toggle("opened", !base);
+  const row = (k, cls) => `<div class="row ${cls}" data-id="${esc(k.id)}" role="button" tabindex="0" aria-label="${esc(k.name)}"><span class="name">${esc(k.name)}</span><span class="fill"></span><span class="val"></span></div>`;
+  const anc = []; for (let p = n.parent; p; p = p.parent) anc.unshift(p);
+  const kids = isRoot && !open.has("nw") ? [] : n.kids;
+  st.innerHTML = `<div class="screen${just === "screen" ? " in" : ""}">` + anc.map(a => row(a, "up")).join("") +
+    (base ? "" : `<div class="head"><span class="name">${esc(n.name)}</span><span class="fill"></span><button class="spb" data-act="story" data-id="${esc(n.id)}" aria-label="History and facts">${spark(n, 96, 20) || "—"}</button></div>`) +
+    `<div class="row root" data-id="${esc(n.id)}" role="button" tabindex="0" aria-label="${esc(n.name)}"><button class="unit w" data-act="lens" aria-label="Change what the numbers show"></button><span class="val"></span></div>` +
+    (story.has(n.id) ? storyHTML(n) : "") +
+    (kids.length ? `<div class="kids${just === "kids" ? " in" : ""}">${kids.map(k => row(k, "")).join("")}</div>` : "") + forms() + `</div>`;
+}
+function fit() {   // the number is as large as the screen is wide
+  const r = $("#stage .row.root"); if (!r) return; const num = r.querySelector(".num"), unit = r.querySelector(".unit"); if (!num) return;
+  r.style.fontSize = "100px"; const w = num.getBoundingClientRect().width || 1, room = r.clientWidth - unit.offsetWidth + 6;
+  r.style.fontSize = Math.max(34, Math.min(room / w * 100, window.innerHeight * .2, 190)).toFixed(1) + "px";
+}
+
+function draw() {
+  build();
+  const st = $("#stage"), focusId = document.activeElement && document.activeElement.closest ? document.activeElement.closest(".row")?.dataset.id : null;
+  if (MOBILE) drawMobile();
+  else {
+    st.classList.toggle("opened", open.has("nw") || story.has("nw") || adding || importing || phonePanel);
+    st.innerHTML = rowHTML(N.nw) + forms();
+  }
+  just = null;
+  charts = $$("[data-chart]", st).map(el => drawChart(el, N[el.dataset.chart])).filter(Boolean);
+  if (focusId && !MOBILE) { const r = st.querySelector(`.row[data-id="${CSS.escape(focusId)}"]`); if (r) r.focus({ preventScroll: true }); }
+  paint();
+}
+
+// Only the numbers change when you move through time or try a what-if, so only they are repainted.
+function paint() {
+  if (!X) return;
+  const i = cur(), L = last();
+  $$("#stage .row").forEach(r => { const n = N[r.dataset.id]; if (!n) return; const big = r.classList.contains("root"); r.querySelector(".val").innerHTML = valHTML(n, big); if (big) r.querySelector(".unit").textContent = LENS[lens][0]; });
+  if (MOBILE) fit();
+  // status: silent unless something is different from the plain view
+  const lines = [];
+  if (S.demo) lines.push("demo data");
+  else if (!S.configured) lines.push("not connected yet. add your Akahu tokens and Swyftx key to config.json, then type sync");
+  if (S.last_error) lines.push("the last sync had a problem: " + esc(CLOUD ? S.last_error.replace(/ ?\(check[^)]*\)/, "") : S.last_error));
+  if (CLOUD && S.last_sync && Date.now() - new Date(S.last_sync).getTime() > 45 * 6e4) lines.push("last updated " + ago(S.last_sync));
+  if (busy) lines.push(esc(busy));
+  if (note) lines.push(note + ` <button class="w d" data-act="ok">ok</button>`);
+  if (i !== L) lines.push(`${shortDate(X.dates[i])}${isEst(N.nw, i) ? ", estimated" : ""} <button class="w d" data-act="today">back to today</button>`);
+  if (Object.values(F).some(f => f !== 1)) lines.push(`what if <button class="w d" data-act="undoall">undo</button>`);
+  if (lens === 4) { const g = gain(N.nw, gainFrom(i), i); lines.push(`${g ? "gain or loss from prices since " + shortDate(X.dates[g.from]) : "no prices recorded yet. they build up a day at a time"} <button class="w d" data-act="dollars">back to dollars</button>`); }
+  else if (lens) lines.push(`${LENS[lens][1]} <button class="w d" data-act="dollars">back to dollars</button>`);
+  $("#status").innerHTML = lines.length ? `<div>${lines.map(l => `<span class="l">${l}</span>`).join("")}</div>` : "";
+  // the line of time
+  const tm = $("#time"); tm.style.display = L > 0 ? "" : "none";
+  if (L > 0) {
+    const f = (T[i] - T[0]) / (T[L] - T[0]), td = $("#tdate");
+    $("#tick").style.left = `calc(${(f * 100).toFixed(3)}% - ${f > .999 ? 1 : 0}px)`;
+    td.style.display = (i !== L || tHover) ? "block" : "none"; td.textContent = i === L ? "today" : shortDate(X.dates[i]);
+    const w = td.offsetWidth || 90, x = Math.min(window.innerWidth - w - 8, Math.max(8, f * window.innerWidth - w / 2)); td.style.left = x + "px";
+  }
+  charts.forEach(c => c.mark(i));
+}
+
+function drawChart(el, n) {
+  const idx = thin(rangeIdx(), 600); if (idx.length < 2) { el.textContent = "no history yet. it builds up a day at a time, or use rebuild past year."; return null; }
+  const W = Math.max(200, el.clientWidth), H = MOBILE ? 150 : 120, vs = idx.map(i => val(n, i, false));
+  let lo = Math.min(...vs), hi = Math.max(...vs); if (hi - lo < 1) { hi += 1; lo -= 1; }
+  const t0 = T[idx[0]], t1 = T[idx[idx.length - 1]], x = i => (T[i] - t0) / (t1 - t0 || 1) * W, y = v => 6 + (hi - v) / (hi - lo) * (H - 12);
+  let solid = "", dash = "";
+  let prev = null;   // one continuous stroke per stretch, so the dashes run evenly
+  for (let k = 1; k < idx.length; k++) {
+    const e = isEst(n, idx[k - 1]), seg = (e === prev ? "" : `M${x(idx[k - 1]).toFixed(1)},${y(vs[k - 1]).toFixed(1)}`) + `L${x(idx[k]).toFixed(1)},${y(vs[k]).toFixed(1)}`;
+    if (e) dash += seg; else solid += seg; prev = e;
+  }
+  el.innerHTML = `<svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" role="img" aria-label="History of ${esc(n.name)}">
+    ${lo < 0 && hi > 0 ? `<line x1="0" x2="${W}" y1="${y(0)}" y2="${y(0)}" stroke="currentColor" stroke-width="1" stroke-dasharray="1 5"/>` : ""}
+    <path d="${dash}" fill="none" stroke="currentColor" stroke-width="1" stroke-dasharray="4 3" stroke-linejoin="round"/><path d="${solid}" fill="none" stroke="currentColor" stroke-width="1.25"/>
+    <line class="xh" y1="0" y2="${H}" stroke="currentColor" stroke-width="1" style="display:none"/><text class="xt" y="12" style="display:none"></text>
+    <rect width="${W}" height="${H}" fill="transparent"/></svg>`;
+  const svg = el.querySelector("svg"), xh = el.querySelector(".xh"), xt = el.querySelector(".xt");
+  const at = e => { const r = svg.getBoundingClientRect(), px = (e.clientX - r.left) / r.width * W; let b = idx[0], bd = 1e12; for (const i of idx) { const d = Math.abs(x(i) - px); if (d < bd) { bd = d; b = i; } } return b; };
+  let t0x = 0, scrub = false;
+  const touchSet = e => { if (!scrub && Math.abs(e.clientX - t0x) < 8) return; scrub = true; const i = at(e); asOf = i === last() ? null : i; peek = null; paint(); };
+  svg.addEventListener("pointerdown", e => { t0x = e.clientX; scrub = false; });
+  svg.addEventListener("pointermove", e => { if (e.pointerType !== "mouse") return touchSet(e); peek = at(e); paint(); });
+  svg.addEventListener("pointerleave", e => { if (e.pointerType !== "mouse") return; peek = null; paint(); });
+  svg.addEventListener("click", e => { e.stopPropagation(); const i = at(e); asOf = i === last() ? null : i; peek = null; paint(); });
+  return { mark(i) {
+    const show = i !== last() && T[i] >= t0 && T[i] <= t1;
+    xh.style.display = xt.style.display = show ? "" : "none"; if (!show) return;
+    const px = x(i); xh.setAttribute("x1", px); xh.setAttribute("x2", px);
+    xt.textContent = `${shortDate(X.dates[i])}  ${isEst(n, i) ? "~" : ""}${fmt(val(n, i, false))}`;
+    const right = px > W * .6; xt.setAttribute("x", px + (right ? -6 : 6)); xt.setAttribute("text-anchor", right ? "end" : "start");
+  } };
+}
+
+// ---------------------------------------------------------------- facts: what's worth knowing about a number
+function facts(n) {
+  const L = last(), out = [], Sx = X.dates.map((_, i) => val(n, i, false)), now = Sx[L], own = val(N.own, L, false);
+  const D = iso => `<button class="w d" data-act="date" data-date="${iso}">${shortDate(iso)}</button>`;
+  const pct = v => own ? Math.round(v / own * 100) + "%" : "";
+  const inOwn = under(n, "own") && n.id !== "own";
+  if (n.kind === "holding") {
+    if (n.h.amount) out.push(`${(+n.h.amount).toLocaleString("en-NZ", { maximumFractionDigits: 6 })} ${esc(n.h.code)}`);
+    if (n.h.price) out.push(`one is worth ${fmt(n.h.price, 2)}`);
+    if (n.h.change24h) out.push(`${n.h.change24h > 0 ? "up" : "down"} ${Math.abs(n.h.change24h).toFixed(1)}% in 24 hours`);
+  }
+  if (inOwn && own) { const sib = n.parent.kids, top = sib.length > 1 && sib.every(k => val(k, L, false) <= now + .005); out.push(`${pct(now)} of what you own${top && n.kind === "cls" ? ", the largest part" : ""}`); }
+  if (n.kind === "root") {
+    const owed = N.owe ? val(N.owe, L, false) : 0;
+    if (owed > 0) out.push(`${(own / owed).toFixed(2)} owned for every 1 owed`);
+    const ks = N["c:kiwisaver"] ? val(N["c:kiwisaver"], L, false) : 0;
+    if (ks > 0) out.push(`${fmt(own - ks - (N["c:property"] ? val(N["c:property"], L, false) : 0))} you could get at now, ${fmt(ks)} locked in KiwiSaver`);
+  }
+  if (n.kind === "root" || n.id === "own") {
+    const things = []; (function walk(m) { if (m.kind === "leaf" && !m.kids.length) things.push(m); else if (m.kind === "holding") { if (m.h.code !== "NZD") things.push(m); } else m.kids.forEach(walk); })(N.own);
+    const topT = things.sort((a, b) => val(b, L, false) - val(a, L, false))[0];
+    if (topT && val(topT, L, false) > 0) out.push(`the largest single thing is ${esc(topT.name.toLowerCase())}, ${fmt(val(topT, L, false))}, ${pct(val(topT, L, false))} of what you own`);
+  }
+  [[30, "30 days"], [90, "3 months"], [365, "a year"]].forEach(([d, label]) => { const j = back(L, d); if (j === null) return; const diff = now - Sx[j]; if (Math.abs(diff) >= 1) out.push(`${diff > 0 ? "up" : "down"} ${fmt(Math.abs(diff))} in ${label}${isEst(n, j) ? ", roughly" : ""}`); });
+  if (n.kind === "root") {
+    const j = back(L, 30);
+    if (j !== null) { const movers = [...N.own.kids, ...(N.owe ? [N.owe] : [])].map(k => ({ k, d: (raw(k, L, false) - raw(k, j, false)) })).sort((a, b) => Math.abs(b.d) - Math.abs(a.d)); if (movers[0] && Math.abs(movers[0].d) >= 1) out.push(`${movers[0].k.id === "owe" ? "what you owe" : esc(movers[0].k.name.toLowerCase())} moved it most in 30 days, ${signed(movers[0].d)}`); }
+  }
+  let hi = 0, lo = 0; Sx.forEach((v, i) => { if (v > Sx[hi]) hi = i; if (v < Sx[lo]) lo = i; });
+  if (Sx[hi] - Sx[lo] >= 1) { out.push(`highest ${isEst(n, hi) ? "about " : ""}${fmt(Sx[hi])} ${hi === L ? "today" : "on " + D(X.dates[hi])}`); out.push(`lowest ${isEst(n, lo) ? "about " : ""}${fmt(Sx[lo])} ${lo === L ? "today" : "on " + D(X.dates[lo])}`); }
+  // month by month
+  const ends = {}; X.dates.forEach((d, i) => ends[d.slice(0, 7)] = i); const ms = Object.keys(ends).sort();
+  if (ms.length >= 3) { let up = null, dn = null; for (let k = 1; k < ms.length; k++) { const d = Sx[ends[ms[k]]] - Sx[ends[ms[k - 1]]]; if (!up || d > up.d) up = { d, m: ms[k] }; if (!dn || d < dn.d) dn = { d, m: ms[k] }; }
+    const M = o => `<button class="w d" data-act="date" data-date="${X.dates[ends[o.m]]}">${monthYear(o.m + "-01")}</button>`;
+    if (up && up.d >= 1) out.push(`biggest rise in a month, ${fmt(up.d)} in ${M(up)}`); if (dn && dn.d <= -1) out.push(`biggest fall in a month, ${fmt(-dn.d)} in ${M(dn)}`); }
+  if (n.kind === "root") {
+    const steps = [0, 1000, 2500, 5000, 10000, 25000, 50000, 100000, 250000, 500000, 1000000];
+    steps.filter(t => t <= now).slice(-2).forEach(t => { let c = null; for (let i = 1; i <= L; i++) if (Sx[i - 1] < t && Sx[i] >= t) c = i; if (c !== null) out.push(`${t ? "passed " + fmt(t) : "went above zero"} on ${D(X.dates[c])}`); });
+    const next = steps.find(t => t > now); if (next !== undefined) out.push(`${fmt(next - now)} to go to ${fmt(next)}`);
+  }
+  // what prices did, apart from money in and out
+  const g = gain(n, 0, L);
+  if (g && L - g.from >= 1 && (Math.abs(g.d) >= 1 || Math.abs(g.r) >= .0005)) {
+    out.push(`from prices alone: ${g.r >= 0 ? "up" : "down"} ${Math.abs(g.r * 100).toFixed(1)}%, ${fmt(Math.abs(g.d))}, since ${D(X.dates[g.from])}`);
+    [[30, "30 days"], [90, "3 months"], [365, "a year"]].forEach(([dd, label]) => { const j = back(L, dd); if (j === null || j <= g.from) return; const k = gain(n, j, L); if (k) out.push(`from prices alone: ${k.r >= 0 ? "up" : "down"} ${Math.abs(k.r * 100).toFixed(1)}%, ${fmt(Math.abs(k.d))}, in ${label}`); });
+    const some = n.kind !== "holding" && (function walk(m) { return m.kind === "leaf" ? (["shares", "crypto", "kiwisaver"].includes(m.leaf.cls) && !priced(m).length) : m.kind !== "holding" && m.kids.some(walk); })(n);
+    if (some) out.push("that leaves out the accounts that don't send prices");
+  } else if (n.kind === "leaf" && n.leaf.source === "sync" && ["shares", "crypto", "kiwisaver"].includes(n.leaf.cls) && !priced(n).length) out.push("no prices come through for this one, so a gain can't be told apart from money you added");
+  // 24 hour price moves
+  if (n.kind !== "holding") { let m = 0; (function walk(k) { if (k.kind === "leaf") k.leaf.holdings.forEach(h => { if (h.change24h) m += h.value - h.value / (1 + h.change24h / 100); }); else k.kids.forEach(walk); })(n); if (Math.abs(m) >= 1 && n.sign > 0) out.push(`prices moved it ${signed(m)} in 24 hours`); }
+  if (n.id === "c:kiwisaver") out.push("locked until 65, except for a first home");
+  if (n.kind === "leaf") {
+    const l = n.leaf;
+    if (l.sched) out.push(`goes ${l.sched.amount < 0 ? "down" : "up"} ${fmt(Math.abs(l.sched.amount), 2)} a ${per[l.sched.every]}${l.sched.next ? ", next on " + shortDate(l.sched.next) : ""}`);
+    if (l.payoff) out.push(`paid off around ${monthYear(l.payoff)} at this rate`);
+    out.push(l.source === "manual" ? `added by you${l.institution ? ", from " + esc(l.institution) : ""}` : `from ${esc(l.institution || "your bank")}`);
+    if (l.updated) { const age = (Date.now() - Date.parse(l.updated)) / 864e5; out.push(`updated ${shortDate(l.updated)}${(l.source === "manual" && !l.sched && age > 90) || (l.source === "sync" && (age > 7 || l.status === "INACTIVE")) ? ", so it may be out of date" : ""}`); }
+  }
+  if (n.kind !== "holding") { let ft = 0; while (ft < L && isEst(n, ft)) ft++; if (ft > 0) out.push(`anything before ${D(X.dates[ft])} is an estimate, shown with ~ and a dashed line`); }
+  if (n.kind === "holding") out.push("past values follow the account it sits in");
+  if (n.kind === "root" && S.last_sync) out.push(`updated ${ago(S.last_sync)}`);
+  return out;
+}
+
+// ---------------------------------------------------------------- doing things
+const flip = (set, id) => set.has(id) ? set.delete(id) : set.add(id);
+function toggle(id) { const n = N[id]; if (!n) return; flip(n.kids.length ? open : story, id); just = id; draw(); }
+function toggleStory(id) { flip(story, id); just = id; draw(); }
+function goTo(id, withStory) { const n = N[id]; if (!n) return; focus = id; if (n.kind === "root") open.add("nw"); if (withStory || !n.kids.length) story.add(id); just = "screen"; draw(); window.scrollTo(0, 0); }
+function reveal(n) { if (MOBILE) return goTo(n.id); for (let p = n.parent; p; p = p.parent) open.add(p.id); if (n.kids.length) open.add(n.id); else story.add(n.id); just = n.id; draw(); const r = $(`.row[data-id="${CSS.escape(n.id)}"]`); if (r) { r.focus({ preventScroll: true }); r.scrollIntoView({ block: "center", behavior: "smooth" }); } }
+function goDate(iso) { let i = 0; X.dates.forEach((d, k) => { if (d <= iso) i = k; }); asOf = i === last() ? null : i; peek = null; paint(); }
+function stepDay(by) { const L = last(); let i = (asOf ?? L); if (Math.abs(by) === 1) i += by; else { const j = by < 0 ? back(i, 30) : (() => { const t = T[i] + 30 * 864e5; let k = i; while (k < L && T[k] < t) k++; return k; })(); i = j ?? 0; } i = Math.max(0, Math.min(L, i)); asOf = i === L ? null : i; paint(); }
+function setLens(k) { lens = k; paint(); }
+function setRange(v) { range = v; draw(); }
+function clearUnder(n) { const ks = keysUnder(n); Object.keys(F).forEach(k => { if (ks.some(x => k === x || k.startsWith(x + "/"))) delete F[k]; }); }
+function whatIf(n, factor) { clearUnder(n); if (factor !== 1) keysUnder(n).forEach(k => F[k] = factor); draw(); }
+const affected = n => Math.abs(val(n, last(), true) - val(n, last(), false)) > .5;
+async function doSync() { busy = "syncing"; paint(); await api("/api/sync", {}); busy = ""; await load(); }
+async function doRebuild() { busy = "rebuilding the past year"; paint(); const r = await api("/api/rebuild-history", {}); busy = ""; note = r.ok ? (r.days_added ? `rebuilt ${r.days_added} days of history` : "history already goes back a year") : "couldn't rebuild: " + esc(r.error); await load(); }
+async function showPhone() { P = await api("/api/phone"); phonePanel = true; adding = importing = false; just = "form"; draw(); const f = $(".form"); if (f) f.scrollIntoView({ block: "center", behavior: "smooth" }); }
+function startAdd() { if (MOBILE) { focus = "nw"; open.add("nw"); } adding = true; importing = false; editing = null; phonePanel = false; just = "form"; draw(); const f = $("#mName"); if (f) { f.focus(); f.scrollIntoView({ block: "center", behavior: "smooth" }); } }
+function startImport() { if (MOBILE) { focus = "nw"; open.add("nw"); } importing = true; adding = false; editing = null; phonePanel = false; just = "form"; draw(); const f = $("#impBal"); if (f) f.scrollIntoView({ block: "center", behavior: "smooth" }); }
+async function saveItem() {
+  const body = { name: $("#mName").value.trim(), cls: $("#mCls").value, value: Math.abs(parseNum($("#mVal").value)), note: $("#mNote").value.trim(), sched_every: $("#mEvery").value, sched_amount: parseNum($("#mStep").value) || 0, sched_next: $("#mNext").value };
+  if (!body.name || isNaN(body.value)) { note = "it needs a name and an amount"; return paint(); }
+  if (body.sched_every && (!body.sched_amount || !body.sched_next)) { note = "to make it change on its own, add the amount and the next date too"; return paint(); }
+  if (editing) body.id = editing;
+  const wasNew = !editing;
+  await api("/api/manual", body); adding = false; editing = null; note = ""; await load();
+  if (wasNew) { const n = Object.values(N).find(x => x.kind === "leaf" && x.leaf.source === "manual" && x.leaf.name === body.name); if (n) reveal(n); }
+}
+async function runImport() {
+  const f = $("#impFile").files[0], bal = parseNum($("#impBal").value);
+  if (!f || !bal) { note = "choose the file and type today's balance"; return paint(); }
+  const b64 = await new Promise(res => { const r = new FileReader(); r.onload = () => res(r.result.split(",")[1]); r.readAsDataURL(f); });
+  busy = "importing"; paint(); const r = await api("/api/import/student-loan", { file: b64, balance: bal }); busy = "";
+  note = r.ok ? `imported ${r.transactions} transactions. usual repayment ${fmt(r.usual_repayment, 2)}${r.yearly_fees ? `, less ${fmt(r.yearly_fees)} in yearly fees, so ${fmt(r.net_per_fortnight, 2)}` : ""} a fortnight. next on ${shortDate(r.next_deduction)}, paid off around ${monthYear(r.paid_off)}` : esc(r.error);
+  if (r.ok) importing = false; await load();
+}
+
+async function runAct(el) {
+  const a = el.dataset.act, d = el.dataset;
+  if (a === "lens") return setLens((lens + 1) % LENS.length);
+  if (a === "dollars") return setLens(0);
+  if (a === "range") return setRange(+d.v);
+  if (a === "date") return goDate(d.date);
+  if (a === "today") { asOf = peek = null; return paint(); }
+  if (a === "undoall") { F = {}; return draw(); }
+  if (a === "undo") return whatIf(N[d.id], 1);
+  if (a === "ok") { note = ""; return paint(); }
+  if (a === "sync") return doSync();
+  if (a === "rebuild") return doRebuild();
+  if (a === "add") return startAdd();
+  if (a === "import") return startImport();
+  if (a === "empty") { showEmpty = !showEmpty; return draw(); }
+  if (a === "unhide") { await api("/api/accounts/" + encodeURIComponent(d.key), { hidden: false }); return load(); }
+  if (a === "hide") { await api("/api/accounts/" + encodeURIComponent(d.id), { hidden: true }); story.delete(d.id); return load(); }
+  if (a === "pick") { picking = d.id; return draw(); }
+  if (a === "setcls") { picking = null; await api("/api/accounts/" + encodeURIComponent(d.id), { cls: d.cls }); return load(); }
+  if (a === "edit") { editing = editing === +d.mid ? null : +d.mid; adding = importing = phonePanel = false; just = "form"; return draw(); }
+  if (a === "del") { deleting = +d.mid; return draw(); }
+  if (a === "really") { deleting = null; await api(`/api/manual/${d.mid}/delete`, {}); return load(); }
+  if (a === "preset") { const [nm, c, s] = JSON.parse(d.p); $("#mName").value = nm; $("#mCls").value = c; $("#mNote").value = s; return $("#mVal").focus(); }
+  if (a === "save") return saveItem();
+  if (a === "importgo") return runImport();
+  if (a === "cancel") { adding = importing = phonePanel = false; editing = null; return draw(); }
+  if (a === "story") return toggleStory(d.id);
+  if (a === "phone") return showPhone();
+  if (a === "awaycopy") { try { await navigator.clipboard.writeText(P.away.url); note = "link copied"; } catch (e) { note = "select the link and copy it"; } return paint(); }
+}
+
+// ---------------------------------------------------------------- pointer and keys
+const stage = $("#stage");
+let drag = null, swallow = false;
+let holdT = null;
+stage.addEventListener("click", e => {
+  if (swallow) { swallow = false; return; }
+  const act = e.target.closest("[data-act]"); if (act) { e.stopPropagation(); return runAct(act); }
+  if (e.target.closest(".form")) return;
+  const row = e.target.closest(".row"); if (!row) return;
+  if (MOBILE) {
+    const n = N[row.dataset.id]; if (!n) return;
+    if (!row.classList.contains("root")) return goTo(n.id);                     // a row: go into it (or back out to it)
+    if (n.kind === "root") { flip(open, "nw"); just = "kids"; return draw(); }    // the number: open or close it
+    return goTo(n.parent.id);                                                    // any other number: step back out
+  }
+  if (e.target.closest(".sp")) return toggleStory(row.dataset.id);
+  toggle(row.dataset.id);
+});
+stage.addEventListener("contextmenu", e => { if (MOBILE) e.preventDefault(); });
+$("#status").addEventListener("click", e => { const act = e.target.closest("[data-act]"); if (act) runAct(act); });
+// what if: drag any number up or down
+// On the Mac you drag the number up or down. On a phone you slide a row sideways, and holding it opens its history.
+stage.addEventListener("pointerdown", e => {
+  swallow = false; clearTimeout(holdT);
+  if (e.button || e.target.closest("[data-act], .form, .story")) return;
+  const el = MOBILE ? e.target.closest(".row") : e.target.closest(".val"); if (!el) return;
+  const row = el.closest(".row"), n = N[row.dataset.id]; if (!n) return;
+  const keys = keysUnder(n); drag = { n, x: e.clientX, y: e.clientY, keys, start: Object.fromEntries(keys.map(k => [k, F[k] ?? 1])), on: false };
+  if (MOBILE) holdT = setTimeout(() => { drag = null; swallow = true; if (row.classList.contains("root")) toggleStory(n.id); else goTo(n.id, true); }, 480);
+});
+window.addEventListener("pointermove", e => {
+  if (!drag) return; const dx = e.clientX - drag.x, dy = e.clientY - drag.y;
+  if (Math.abs(dx) > 8 || Math.abs(dy) > 8) clearTimeout(holdT);
+  const d = MOBILE ? dx : -dy, slack = MOBILE ? 12 : 6;
+  if (!drag.on && (Math.abs(d) < slack || (MOBILE && Math.abs(dy) > Math.abs(dx)))) return;
+  drag.on = true; let m = Math.exp((d - Math.sign(d) * slack) * (MOBILE ? .005 : .006)); if (Math.abs(m - 1) < .015) m = 1;
+  drag.keys.forEach(k => { const f = drag.start[k] * m; if (Math.abs(f - 1) < 1e-9) delete F[k]; else F[k] = f; }); paint();
+});
+window.addEventListener("pointercancel", () => { clearTimeout(holdT); drag = null; });
+window.addEventListener("pointerup", () => { clearTimeout(holdT); if (drag && drag.on) { swallow = true; draw(); } drag = null; });
+// the line of time along the bottom
+const time = $("#time");
+const timeAt = e => { const f = Math.max(0, Math.min(1, e.clientX / window.innerWidth)), t = T[0] + f * (T[last()] - T[0]); let b = 0, bd = Infinity; T.forEach((x, i) => { const d = Math.abs(x - t); if (d < bd) { bd = d; b = i; } }); return b; };
+const timeTouch = e => { if (!X) return; const i = timeAt(e); asOf = i === last() ? null : i; peek = null; tHover = true; paint(); };
+time.addEventListener("pointerdown", e => { if (e.pointerType !== "mouse") { time.setPointerCapture(e.pointerId); timeTouch(e); } });
+time.addEventListener("pointermove", e => { if (!X) return; if (e.pointerType !== "mouse") return timeTouch(e); tHover = true; peek = timeAt(e); paint(); });
+time.addEventListener("pointerup", e => { if (e.pointerType !== "mouse") { tHover = false; paint(); } });
+time.addEventListener("pointerleave", e => { if (e.pointerType !== "mouse") return; tHover = false; peek = null; paint(); });
+time.addEventListener("click", e => { const i = timeAt(e); asOf = i === last() ? null : i; peek = null; paint(); });
+
+stage.addEventListener("keydown", e => {
+  const row = e.target.closest(".row"); if (!row || e.target !== row) return;
+  const rows = $$("#stage .row"), k = rows.indexOf(row), n = N[row.dataset.id];
+  if (e.key === "ArrowDown" || e.key === "ArrowUp") { e.preventDefault(); const t = rows[k + (e.key === "ArrowDown" ? 1 : -1)]; if (t) { t.focus(); t.scrollIntoView({ block: "nearest" }); } }
+  else if (e.key === "Enter") { e.preventDefault(); toggle(n.id); }
+  else if (e.key === " ") { e.preventDefault(); toggleStory(n.id); }
+  else if (e.key === "ArrowRight" && n.kids.length && !open.has(n.id)) { e.preventDefault(); toggle(n.id); }
+  else if (e.key === "ArrowLeft") { e.preventDefault(); if (open.has(n.id) && n.kids.length) toggle(n.id); else if (n.parent) { const p = $(`.row[data-id="${CSS.escape(n.parent.id)}"]`); if (p) p.focus(); } }
+});
+document.addEventListener("keydown", e => {
+  if (!X || e.metaKey || e.ctrlKey || e.altKey) return;
+  const t = e.target, typing = t.matches && t.matches("input, select, textarea");
+  if (typing) return;
+  if (e.key === "Escape") { asOf = peek = null; lens = 0; F = {}; note = ""; picking = deleting = null; return draw(); }
+  if (e.key >= "1" && e.key <= "5") return setLens(+e.key - 1);
+  if (e.key === ",") return stepDay(-1); if (e.key === ".") return stepDay(1);
+  if (e.key === "<") return stepDay(-30); if (e.key === ">") return stepDay(30);
+  if (e.key === "?" || e.key === "/") { e.preventDefault(); return $("#q").focus(); }
+  if (e.key === "ArrowDown" && !(t.closest && t.closest(".row"))) { e.preventDefault(); const r = $("#stage .row"); return r && r.focus(); }
+  if (e.key.length === 1 && e.key !== " ") $("#q").focus();   // start typing anywhere
+});
+
+// ---------------------------------------------------------------- the prompt: find anything, do anything
+const q = $("#q"), cmd = $("#cmd"), sugg = $("#sugg");
+let list = [], sel = 0, nav = false;
+const HELP = MOBILE ? [
+  ["tap the number", "see what it's made of"], ["tap a row", "it becomes the number. tap the number, or a row above it, to come back out"],
+  ["hold a number, or tap the small line", "its history and facts"], ["slide a row left or right", "what if it were less or more"],
+  ["slide along the line at the bottom, or across a chart", "wind everything back to any day"], ["tap a date", "go to that day"],
+  ["tap $", "dollars, share, change, gain from prices"], ["type here", "find anything, or try: crypto -50%"]] : [
+  ["click a number", "see what it's made of"], ["point at a row, click its line", "history and facts"], ["drag a number up or down", "what if it were more or less"],
+  ["the line along the bottom", "wind everything back to any day"], ["click a date", "go to that day"], ["click $", "dollars, share, change, gain from prices"],
+  ["keys 1 2 3 4", "the same four views"], ["keys , and .", "a day back or forward (< > a month)"], ["arrows, enter, space", "move, open, history"],
+  ["esc", "back to today, undo everything"], ["type", "find anything, or try: crypto -50%"]];
+function commands() {
+  const c = [...(CLOUD ? [["check for newer numbers", async () => { await load(); note = S.last_sync ? "updated " + ago(S.last_sync) : ""; paint(); }]]
+      : [["sync now", doSync], ["add something", startAdd], ["import student loan from myIR", startImport], ["rebuild past year", doRebuild]]),
+    ["invert", () => setInv(!document.documentElement.classList.contains("inv"))], ["back to today", () => { asOf = peek = null; paint(); }], ["undo what if", () => { F = {}; draw(); }],
+    ...(MOBILE ? [["back to just the number", () => { focus = "nw"; open.clear(); story.clear(); adding = importing = false; editing = null; draw(); window.scrollTo(0, 0); }]]
+      : [["open everything", () => { Object.values(N).forEach(n => n.kids.length && open.add(n.id)); just = "nw"; draw(); }], ["close everything", () => { open.clear(); story.clear(); adding = importing = phonePanel = false; editing = null; draw(); }],
+         ...(S.local ? [["phone: see this on your phone", () => showPhone()],
+           ["copy account outline for Claude", async () => { const t = JSON.stringify(await api("/api/shapes")); try { await navigator.clipboard.writeText(t); note = "copied. it lists what each provider sends, with every name and figure left out"; } catch (e) { note = "couldn't copy"; } paint(); }]] : [])]),
+    [showEmpty ? "hide empty accounts" : "show empty accounts", () => { showEmpty = !showEmpty; draw(); }],
+    ...LENS.map(([, l], k) => ["show " + l, () => setLens(k)]), ["3 months of history", () => setRange(90)], ["1 year of history", () => setRange(365)], ["all history", () => setRange(0)]];
+  X.hidden.forEach(h => c.push([`show ${h.name.toLowerCase()} again`, async () => { await api("/api/accounts/" + encodeURIComponent(h.key), { hidden: false }); load(); }]));
+  Object.values(N).forEach(n => c.push([n.name.toLowerCase(), () => reveal(n), n.kind === "root" ? "" : (n.parent.kind === "root" ? "" : n.parent.name.toLowerCase())]));
+  return c;
+}
+function findNode(text) { const t = text.trim().toLowerCase(); if (!t) return null; const all = Object.values(N); return all.find(n => n.name.toLowerCase() === t) || all.find(n => n.name.toLowerCase().startsWith(t)) || all.find(n => n.name.toLowerCase().includes(t)); }
+function suggest() {
+  const text = q.value.trim().toLowerCase(); list = [];
+  if (!X) return;
+  let m;
+  const isDate = /^(\d{1,2}\s+[a-z]{3,}\s+\d{4}|[a-z]{3,}\s+\d{4}|\d{4}-\d{2}-\d{2})$/.test(text);
+  if ((m = text.match(/^(.+?)\s*([+\-−]\s*\d+(?:\.\d+)?)\s*%$/))) { const n = findNode(m[1]), p = parseNum(m[2].replace(/\s/g, "")); if (n && p > -100) list.push([`what if ${n.name.toLowerCase()} were ${p > 0 ? "up" : "down"} ${Math.abs(p)}%`, () => whatIf(n, 1 + p / 100)]); }
+  else if (!isDate && (m = text.match(/^(.+?)\s+=?\s*\$?(\d[\d,]*(?:\.\d+)?)$/))) { const n = findNode(m[1]), target = parseNum(m[2]), base = n ? val(n, last(), false) : 0; if (n && base > 0) list.push([`what if ${n.name.toLowerCase()} were ${fmt(target)}`, () => whatIf(n, target / base)]); }
+  if (isDate) { const d = new Date(/^[a-z]/.test(text) ? "1 " + text : text); if (!isNaN(d)) { const iso = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`; if (iso >= X.dates[0] && iso <= X.dates[last()]) list.push([`go to ${shortDate(iso)}`, () => goDate(iso)]); } }
+  const toks = text.split(/\s+/).filter(Boolean);
+  const found = commands().filter(c => toks.every(t => c[0].includes(t)));
+  // best matches first: names that start with what you typed, then words that do
+  const rank = c => !text ? 0 : c[0].startsWith(text) ? 0 : c[0].split(/\s+/).some(w => w.startsWith(toks[0])) ? 1 : 2;
+  list.push(...found.map((c, i) => [rank(c), i, c]).sort((a, b) => a[0] - b[0] || a[1] - b[1]).map(x => x[2]));
+  if (text) list = list.slice(0, 14);
+  sel = Math.min(sel, Math.max(0, list.length - 1));
+  sugg.innerHTML = (text ? "" : HELP.map(h => `<div><span>${h[0]}</span><span>${h[1]}</span></div>`).join("") + `<div class="gap"></div>`) +
+    (list.length ? list.map((c, i) => `<div class="c${i === sel && (text || nav) ? " sel" : ""}" data-i="${i}"><span>${esc(c[0])}</span><span>${esc(c[2] || "")}</span></div>`).join("") : `<div><span>nothing matches</span></div>`);
+}
+function run(i) { const c = list[i]; q.value = ""; q.blur(); if (c) c[1](); }
+q.addEventListener("focus", () => { cmd.classList.add("open"); q.placeholder = "type to find anything"; sel = 0; nav = false; suggest(); });
+q.addEventListener("blur", () => { cmd.classList.remove("open"); q.placeholder = "_"; q.value = ""; });
+q.addEventListener("input", () => { sel = 0; nav = false; suggest(); });
+q.addEventListener("keydown", e => {
+  if (e.key === "Escape") { e.stopPropagation(); q.value = ""; q.blur(); }
+  else if (e.key === "Enter") { e.preventDefault(); if (q.value.trim() || nav) run(sel); }
+  else if (e.key === "ArrowDown" || e.key === "ArrowUp") { e.preventDefault(); sel = nav || q.value.trim() ? Math.max(0, Math.min(list.length - 1, sel + (e.key === "ArrowDown" ? 1 : -1))) : 0; nav = true; suggest(); const el = sugg.querySelector(".sel"); if (el) el.scrollIntoView({ block: "nearest" }); }
+});
+sugg.addEventListener("mousedown", e => { e.preventDefault(); });
+sugg.addEventListener("click", e => { const c = e.target.closest(".c"); if (c) run(+c.dataset.i); });
+$("#qx").addEventListener("click", () => q.blur());
+
+// ---------------------------------------------------------------- loading
+async function load() {
+  try {
+    S = await api("/api/state");
+    if (S.version !== UI_VERSION) {
+      let tried = false; try { tried = sessionStorage.getItem("jm-restart") === UI_VERSION; sessionStorage.setItem("jm-restart", UI_VERSION); } catch (e) { tried = true; }
+      $("#stage").classList.add("opened");
+      if (!CLOUD && !tried) { $("#stage").textContent = "updating…"; try { await api("/api/restart", {}); } catch (e) {} setTimeout(() => location.reload(), 2500); return; }   // the running copy is older than these files: swap it
+      $("#stage").textContent = "__APP_NAME__ was updated, but the old version is still running. Restart the computer, or on a Mac double-click restart.command in the app's folder."; return; }
+    if (CLOUD && X && bundle && bundle.built === shownBuilt) return;     // nothing new since the last look
+    X = await api("/api/explore"); T = X.dates.map(d => dayOf(d).getTime());
+    if (CLOUD) shownBuilt = bundle.built;
+    if (asOf !== null && asOf > last()) asOf = null;
+    draw();
+  } catch (e) {
+    console.error(e); const st = $("#stage"); st.classList.add("opened");
+    if (!CLOUD) { st.textContent = "This couldn't load. Close it and open it again. If it keeps happening, send Claude this: " + (e && e.message); return; }
+    if (X && e.message === "offline") return;      // keep showing what we have
+    if (e.message === "offline") st.textContent = "couldn't load. check your connection, then open this again.";
+    else if (e.message === "nokey" || e.message === "key") {
+      st.innerHTML = `<div class="form"><div class="facts"><div>${e.message === "key" ? "that link doesn't open this any more." : "this needs your private link."} on your computer, type phone in the app, then scan the square or paste the link here.</div></div>
+        <div class="line"><input id="ck" placeholder="paste your link" aria-label="Your private link" autocapitalize="off" autocorrect="off" spellcheck="false"></div><div class="words"><button class="w on" id="ckgo">open</button></div></div>`;
+      const go = () => { const v = $("#ck").value.trim(), m = /k=([\w-]+)/.exec(v) || /^([\w-]{16,})$/.exec(v); if (!m) return; try { localStorage.setItem("jm-k", m[1]); } catch (x) {} history.replaceState(null, "", "#k=" + m[1]); st.textContent = ""; st.classList.remove("opened"); load(); };
+      $("#ckgo").onclick = go; $("#ck").onkeydown = ev => { if (ev.key === "Enter") go(); };
+    } else st.textContent = "this couldn't be opened. on your computer, run the phone setup again. (" + (e && e.message) + ")";
+  }
+}
+load();
+const idle = () => !(adding || importing || editing || drag || document.activeElement === q || (document.activeElement && document.activeElement.matches("input, select")));
+// On the phone: look for new numbers every minute while it's open, and the moment it's opened again.
+setInterval(() => { if (idle() && !document.hidden) load(); }, (CLOUD ? 60 : 5 * 60) * 1000);
+document.addEventListener("visibilitychange", () => { if (!document.hidden && CLOUD && idle()) load(); });
+window.addEventListener("resize", () => { clearTimeout(window.__rs); window.__rs = setTimeout(() => X && draw(), 150); });
+</script>
+</body>
+</html>
